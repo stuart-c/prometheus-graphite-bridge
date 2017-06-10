@@ -8,4 +8,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY prometheus-graphite-bridge.py .
 
 ENTRYPOINT [ "python", "./prometheus-graphite-bridge.py" ]
-CMD ""
+CMD [ "--help" ]
