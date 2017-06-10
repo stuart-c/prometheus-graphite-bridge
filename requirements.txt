@@ -1,2 +1,3 @@
+humanfriendly
 prometheus_client
 requests
