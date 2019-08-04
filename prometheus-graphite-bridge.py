@@ -29,18 +29,28 @@ SCRAPE_DURATION = Counter(
 
 class ScrapeCollector(object):
 
-    def __init__(self, target):
+    def __init__(self, target, retry):
         self._target = target
+        self._retry = retry
 
     def collect(self):
-        metrics = requests.get(self._target).content.decode('utf-8')
-
+        metrics = None
+        for i in range(0, self._retry + 1):
+            try:
+                metrics = requests.get(self._target).content.decode('utf-8')
+            except requests.exceptions.ConnectionError as ce:
+                time.sleep(1)
+                logging.warning(f"got {ce}, retrying {self._retry - i} more times.. ")
+                if i == self._retry:
+                    raise ce
+                continue
+            break
         return text_string_to_metric_families(metrics)
 
 
-def setup_bridge(prom, graphite):
+def setup_bridge(prom, retry, graphite):
     registry = CollectorRegistry()
-    registry.register(ScrapeCollector(prom))
+    registry.register(ScrapeCollector(prom, retry))
 
     logging.info('Scrape target: %s', prom)
     logging.info('Graphite server: %s:%i', *graphite)
@@ -80,6 +90,7 @@ def cmdline_parse():
     defaults['graphite_host'] = os.environ.get('GRAPHITE_HOST')
     defaults['graphite_port'] = os.environ.get('GRAPHITE_PORT')
     defaults['graphite_prefix'] = os.environ.get('GRAPHITE_PREFIX')
+    defaults['retry_count'] = os.environ.get('RETRY_COUNT')
 
     defaults = dict((k, v) for k, v in defaults.items() if v is not None)
 
@@ -112,6 +123,9 @@ def cmdline_parse():
     parser.add_argument('--graphite-prefix', '--prefix',
                         metavar='PREFIX',
                         help='prefix to add to all metrics sent to Graphite')
+    parser.add_argument('--retry-count',
+                        type=int, default=10, metavar='NUM',
+                        help='times to retry connecting to target')
 
     parser.set_defaults(**defaults)
 
@@ -154,7 +168,7 @@ if __name__ == '__main__':
     logging.info('Publishing internal metrics on port %s', CONFIG.metrics_port)
     start_http_server(CONFIG.metrics_port)
 
-    BRIDGE = setup_bridge(CONFIG.scrape_target, CONFIG.graphite_host)
+    BRIDGE = setup_bridge(CONFIG.scrape_target, CONFIG.retry_count, CONFIG.graphite_host)
 
     while True:
         scrape_and_wait(BRIDGE, CONFIG.scrape_interval, CONFIG.graphite_prefix)
